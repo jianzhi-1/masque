@@ -55,6 +55,7 @@ def align_mfcc(mfcc_a, mfcc_b, path):
     return aligned_mfcc_b
 
 def main(audio_file_1, audio_file_2):
+    
     # 0. Load audio files
     audio_a, sr_a = load_audio(audio_file_1)
     audio_b, sr_b = load_audio(audio_file_2)
