@@ -118,3 +118,7 @@ def transcript_to_audio(sentence, save_file_name):
 def transcript_to_mel(sentence):
     mel_output, mel_length, alignment = tacotron2.encode_text(sentence)
     return mel_output.squeeze() # remove the batch dimension
+
+def mel_to_audio(mel_output, save_file_name):
+    waveforms = hifi_gan.decode_batch(mel_output) # spectrogram to waveform
+    torchaudio.save(save_file_name, waveforms.squeeze(1), 22050)
