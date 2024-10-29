@@ -46,13 +46,13 @@ def load_audio(file_path):
     y, sr = librosa.load(file_path, sr=None)
     return y, sr
 
-def align_mfcc(mfcc_a, mfcc_b, path):
-    aligned_mfcc_b = np.zeros_like(mfcc_a)
+def align(signal_a, signal_b, path):
+    aligned_b = np.zeros_like(signal_a)
 
     for idx_a, idx_b in path:
-        aligned_mfcc_b[idx_a] = mfcc_b[idx_b]
+        aligned_b[idx_a] = signal_b[idx_b]
 
-    return aligned_mfcc_b
+    return aligned_b
 
 def main(audio_file_1, audio_file_2):
     
