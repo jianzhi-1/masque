@@ -75,7 +75,7 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
             "data_mel": torch.tensor(aligned_to_ai_spectrogram), 
             "label": torch.tensor([self.label_encoder[label]]), 
             "speaker": torch.tensor([self.speaker_encoder[speaker]]), 
-            "original_data_mel": data_mel_spectrogram
+            "original_data_mel": torch.tensor(data_mel_spectrogram)
         }
     
     @staticmethod

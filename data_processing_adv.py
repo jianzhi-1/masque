@@ -120,5 +120,9 @@ def transcript_to_mel(sentence):
     return mel_output.squeeze() # remove the batch dimension
 
 def mel_to_audio(mel_output, save_file_name):
+    if isinstance(mel_output, np.ndarray):
+        mel_output = torch.tensor(mel_output)
+    if mel_output.shape[0] != 80:
+        mel_output = torch.einsum("ij->ji", mel_output)
     waveforms = hifi_gan.decode_batch(mel_output) # spectrogram to waveform
     torchaudio.save(save_file_name, waveforms.squeeze(1), 22050)
