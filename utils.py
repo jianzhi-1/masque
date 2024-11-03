@@ -43,7 +43,7 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
         
         # 0. Preprocessing
         
-        if idx in self.cache: return self.cache
+        if idx in self.cache: return self.cache[idx]
         idx += self.base_pointer
         assert idx < self.limit_pointer, "index out of bounds"
         item = self.source[idx]
@@ -70,13 +70,15 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
         assert aligned_to_ai_spectrogram.shape[1] == 80
         
         # 3. Return AI Mel, aligned Data Mel, Emotion Label, Speaker Label, original Data Mel
-        return {
+        self.cache[idx] = {
             "ai_mel": torch.tensor(ai_mel_spectrogram), 
             "data_mel": torch.tensor(aligned_to_ai_spectrogram), 
             "label": torch.tensor([self.label_encoder[label]]), 
             "speaker": torch.tensor([self.speaker_encoder[speaker]]), 
-            "original_data_mel": torch.tensor(data_mel_spectrogram)
+            "original_data_mel": torch.tensor(data_mel_spectrogram),
+            "sequence_length": torch.tensor([ai_mel_spectrogram.shape[0]])
         }
+        return self.cache[idx]
     
     @staticmethod
     def collate(batch):
@@ -86,16 +88,19 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
             [item["ai_mel"] for item in batch],
             batch_first=True, padding_value=-np.inf)
         data_mel = pad_sequence(
-            [item['data_mel'] for item in batch],
+            [item["data_mel"] for item in batch],
             batch_first=True, padding_value=-np.inf)
-        labels = torch.cat(tuple([item['label'] for item in batch]))
+        labels = torch.cat(tuple([item["label"] for item in batch]))
+        sequence_lengths = torch.cat(tuple([item["sequence_length"] for item in batch]))
         return {
-            'ai_mel': ai_mel.to(device), 
-            'data_mel': data_mel.to(device), 
-            'labels': labels.to(device)
+            "ai_mel": ai_mel.to(device), 
+            "data_mel": data_mel.to(device), 
+            "labels": labels.to(device),
+            "sequence_length": sequence_lengths.to(device),
+            "mask": torch.where(torch.isneginf(ai_mel), torch.tensor(0), torch.tensor(1)).to(device)
         }
 
-def train(model, num_epochs, batch_size, model_file, source,
+def train(model, source, num_epochs, batch_size, model_file,
           learning_rate=8e-4, dataset_cls=MelSpectrogramDataset):
     dataset = dataset_cls('train', source)
     data_loader = torch.utils.data.DataLoader(

@@ -1,6 +1,9 @@
 # Masque
 
-
+### Set up
+```python
+pip install librosa soundfile speechbrain
+```
 
 ### Citations
 

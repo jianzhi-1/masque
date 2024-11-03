@@ -126,3 +126,8 @@ def mel_to_audio(mel_output, save_file_name):
         mel_output = torch.einsum("ij->ji", mel_output)
     waveforms = hifi_gan.decode_batch(mel_output) # spectrogram to waveform
     torchaudio.save(save_file_name, waveforms.squeeze(1), 22050)
+
+def sample_audio(dataset, idx:int):
+    print(dataset[idx])
+    mel_to_audio(torch.einsum("ij->ji", dataset[idx]["data_mel"]), f"sample_{idx}.wav")
+    mel_to_audio(torch.einsum("ij->ji", torch.tensor(dataset[idx]["original_data_mel"])), f"sample_{idx}_original.wav")
