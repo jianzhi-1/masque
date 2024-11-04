@@ -1,4 +1,11 @@
-# Masque
+# Masque 🎭
+
+### Progress
+- [x] Phase I: Transformer encoder architecture
+- [ ] Phase II: upcoming
+- [ ] Phase III: upcoming
+- [ ] Phase IV: upcoming
+- [ ] Report
 
 ### Set up
 ```python
