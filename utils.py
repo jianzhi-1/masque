@@ -1,7 +1,7 @@
 import torch
 from torch.nn.utils.rnn import pad_sequence
 import numpy as np
-from data_processing_adv import get_spectrogram_from_waveform, transcript_to_mel
+from data_processing_adv import get_spectrogram_from_waveform, transcript_to_mel, mel_to_audio
 from data_processing import dtw, align
 import tqdm.notebook
 import logging
@@ -171,8 +171,42 @@ def train(model, source, params, num_epochs, batch_size, model_file,
                 torch.save(model.state_dict(), model_file)
                 best_metric = validation_metric
         logging.info(f"=== END OF EPOCH {epoch + 1}")
+        
+        if epoch == 0: # save the dtw-processed dataset
+            torch.save({'training_data': [dataset[i] for i in range(len(dataset))], 'validation_data': [validation_dataset[i] for i in range(len(validation_dataset))]}, 'speaker1_dataset.pth')
+    
+    print("Reloading best model checkpoint from {}...".format(model_file))
     model.load_state_dict(torch.load(model_file))
     return validation_curve, total_loss_curve
+
+def predict(model, source, params, dataset_cls=MelSpectrogramDataset, num_limit=10):
+
+    model.eval()
+    
+    test_dataset = dataset_cls(
+        'test', 
+        source,
+        params
+    )
+
+    data_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=1, collate_fn=dataset.collate
+    )
+    
+    with tqdm.notebook.tqdm(
+        data_loader,
+        total=len(data_loader)) as batch_iterator:
+        model.eval()
+
+        for i, batch in enumerate(batch_iterator, start=1):
+            if i > num_limit: break
+            _, seq_length, n_mels = batch["ai_mel"].shape
+            assert n_mels == 80
+            pred = model.transform(batch)
+            assert pred.shape == (1, seq_length, n_mels)
+            assert pred.squeeze().shape == (seq_length, n_mels)
+            mel_to_audio(pred.squeeze(), f"test{i}_pred.wav")
+            mel_to_audio(batch["data_mel"].squeeze(), f"test{i}_actual.wav")
 
 if __name__ == "__main__":
     from datasets import load_dataset
@@ -182,3 +216,18 @@ if __name__ == "__main__":
     print(dataset[1234]) # data visualisation
     print(dataset[5000]) # data visualisation
     print(dataset[11000]) # out of bound error
+
+    # prediction
+    transformer_predict_model = TransformerEmotionModel()
+    transformer_predict_model.load_state_dict(torch.load("/kaggle/working/transformer_encoder_model.pt"))
+    transformer_predict_model.to(device)
+    predict(
+        transformer_predict_model, 
+        filtered_ds, 
+        params = {
+            "train": (0, 2000),
+            "valid": (2000, 2450),
+            "test": (2450, 2903)
+        },
+        num_limit=10
+    )
