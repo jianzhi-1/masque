@@ -4,6 +4,7 @@ import numpy as np
 from data_processing_adv import get_spectrogram_from_waveform, transcript_to_mel
 from data_processing import dtw, align
 import tqdm.notebook
+import logging
 
 class MelSpectrogramDataset(torch.utils.data.Dataset):
     def __init__(self, split, source):
@@ -100,9 +101,19 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
             "mask": torch.where(torch.isneginf(ai_mel), torch.tensor(0), torch.tensor(1)).to(device)
         }
 
-def train(model, source, num_epochs, batch_size, model_file,
+def train(model, source, params, num_epochs, batch_size, model_file,
           learning_rate=8e-4, dataset_cls=MelSpectrogramDataset):
-    dataset = dataset_cls('train', source)
+    dataset = dataset_cls(
+        'train', 
+        source,
+        params
+    )
+    validation_dataset = dataset_cls(
+        'valid', 
+        source,
+        params
+    )
+    
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=True, collate_fn=dataset.collate
     )
@@ -119,8 +130,12 @@ def train(model, source, num_epochs, batch_size, model_file,
         steps_per_epoch=len(data_loader),
         pct_start=0.02,  # Warm up for 2% of the total training time
     )
-    best_metric = 0.0
+    best_metric = None
+    
+    validation_curve = []
+    total_loss_curve = []
     for epoch in tqdm.notebook.trange(num_epochs, desc="training", unit="epoch"):
+        logging.info(f"=== EPOCH {epoch + 1}")
         with tqdm.notebook.tqdm(
             data_loader,
             desc="epoch {}".format(epoch + 1),
@@ -132,24 +147,32 @@ def train(model, source, num_epochs, batch_size, model_file,
                 optimizer.zero_grad()
                 loss = model.compute_loss(batch)
                 total_loss += loss.item()
+                if i % 20 == 0:
+                    print(f"epoch={epoch + 1}; batch={i}; loss={loss.item()}; total_loss={total_loss}")
+                logging.info(f"epoch={epoch + 1}; batch={i}; loss={loss.item()}; total_loss={total_loss}")
                 loss.backward()
                 optimizer.step()
                 scheduler.step()
                 batch_iterator.set_postfix(mean_loss=total_loss / i)
-            validation_metric = model.get_validation_metric()
+            total_loss_curve.append(total_loss)
+            validation_metric = model.get_validation_metric(validation_dataset)
+            validation_curve.append(validation_metric)
             batch_iterator.set_postfix(
                 mean_loss=total_loss / i,
                 validation_metric=validation_metric
             )
-            if validation_metric > best_metric:
+            print(f"epoch={epoch + 1}; validation={validation_metric}")
+            logging.info(f"epoch={epoch + 1}; validation={validation_metric}")
+            if best_metric is None or validation_metric < best_metric:
                 print(
                     "Obtained a new best validation metric of {:.3f}, saving model "
                     "checkpoint to {}...".format(validation_metric, model_file)
                 )
                 torch.save(model.state_dict(), model_file)
                 best_metric = validation_metric
-    print("Reloading best model checkpoint from {}...".format(model_file))
+        logging.info(f"=== END OF EPOCH {epoch + 1}")
     model.load_state_dict(torch.load(model_file))
+    return validation_curve, total_loss_curve
 
 if __name__ == "__main__":
     from datasets import load_dataset
