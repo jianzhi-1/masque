@@ -101,6 +101,44 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
             "mask": torch.where(torch.isneginf(ai_mel), torch.tensor(0), torch.tensor(1)).to(device)
         }
 
+class ProcessedMelSpectrogramDataset(torch.utils.data.Dataset):
+    def __init__(self, split, data):
+        assert split in ("train", "valid", "test"), "invalid split"
+        m = {
+            "train": "training_data",
+            "valid": "validation_data",
+            "test": "testing_data"
+        }
+        self.data = data
+        self.split = m[split]
+        
+        import random
+        random.seed(225) # reproducibility
+        random.shuffle(self.data["training_data"])
+
+    def __len__(self):
+        return len(self.data[self.split])
+
+    def __getitem__(self, idx:int):
+        assert idx >= 0 and idx < len(self), "Index error in ProcessedMelSpectrogramDataset"
+        return self.data[self.split][idx]
+
+def cache_dataset(source, params, save_file_name="alldata.pth"):
+    train_dataset = MelSpectrogramDataset("train", source, params)
+    train_ls = [train_dataset[i] for i in range(len(train_dataset))]
+    print("finished processing train")
+    validation_dataset = MelSpectrogramDataset("valid", source, params)
+    valid_ls = [validation_dataset[i] for i in range(len(validation_dataset))]
+    print("finished processing valid")
+    test_dataset = MelSpectrogramDataset("valid", source, params)
+    test_ls = [test_dataset[i] for i in range(len(test_dataset))]
+    print("finished processing test")
+    torch.save({
+        "training_data": train_ls, 
+        "validation_data": valid_ls,
+        "testing_data": test_ls
+    }, save_file_name)
+
 def train(model, source, params, num_epochs, batch_size, model_file,
           learning_rate=8e-4, dataset_cls=MelSpectrogramDataset):
     dataset = dataset_cls(
@@ -172,9 +210,6 @@ def train(model, source, params, num_epochs, batch_size, model_file,
                 best_metric = validation_metric
         logging.info(f"=== END OF EPOCH {epoch + 1}")
         
-        if epoch == 0: # save the dtw-processed dataset
-            torch.save({'training_data': [dataset[i] for i in range(len(dataset))], 'validation_data': [validation_dataset[i] for i in range(len(validation_dataset))]}, 'speaker1_dataset.pth')
-    
     print("Reloading best model checkpoint from {}...".format(model_file))
     model.load_state_dict(torch.load(model_file))
     return validation_curve, total_loss_curve
@@ -231,3 +266,22 @@ if __name__ == "__main__":
         },
         num_limit=10
     )
+
+    # Caching
+    cache_dataset(ds["train"], {
+        "train": (0, 7000),
+        "valid": (7000, 10000),
+        "test": (10000, 11615)
+    }, save_file_name="alldata.pth")
+
+    filtered_ds = ds["train"].filter(lambda x: x['speaker_id'] == "ex01")
+    cache_dataset(filtered_ds, {
+        "train": (0, 2000),
+        "valid": (2000, 2450),
+        "test": (2450, 2903)
+    }, save_file_name="speaker1.pth")
+
+    # Processed dataset
+    processed_dataset = torch.load("speaker1.pth")
+    train_processed_dataset = ProcessedMelSpectrogramDataset("train", processed_dataset)
+
