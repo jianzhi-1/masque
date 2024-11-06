@@ -69,12 +69,17 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
         # 3. Duration modelling
         
         duration_arr = np.zeros(len(ai_mel_spectrogram))
-        duration_idx = 0
-        for i in range(len(duration_arr)):
-            while duration_idx < len(path) and path[duration_idx][0] == i:
-                duration_arr[i] += 1
-                duration_idx += 1
-            pass
+        for i, (x, y) in enumerate(path):
+            if i == 0:
+                duration_arr[x] += 1
+            else:
+                xp, yp = path[i - 1]
+                if yp == y:
+                    duration_arr[xp] -= 1
+                    duration_arr[x] += 1
+                else:
+                    duration_arr[x] += 1
+        assert sum(duration_arr) == len(data_mel_spectrogram), "duration modelling not successful"
         
         # 4. Return AI Mel, aligned Data Mel, Emotion Label, Speaker Label, original Data Mel
         self.cache[idx] = {
