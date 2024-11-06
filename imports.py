@@ -3,9 +3,13 @@ import librosa
 import matplotlib.pyplot as plt
 import soundfile as sf
 
+import logging
+
 from speechbrain.inference.vocoders import HIFIGAN
 from speechbrain.inference.TTS import Tacotron2
 from speechbrain.lobes.models.FastSpeech2 import mel_spectogram
+
+import IPython.display as ipd
 
 import torch
 import torch.nn as nn

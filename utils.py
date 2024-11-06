@@ -7,14 +7,9 @@ import tqdm.notebook
 import logging
 
 class MelSpectrogramDataset(torch.utils.data.Dataset):
-    def __init__(self, split, source):
+    def __init__(self, split, source, params):
         assert split in ("train", "valid", "test"), "invalid split"
-        params = {
-            "train": (0, 7000),
-            "valid": (7000, 10000),
-            "test": (10000, 11615)
-        }
-        self.source = source
+        self.source = source.shuffle(seed=42) # for reproducibility
         self.base_pointer, self.limit_pointer = params[split]
         self.cache = dict()
         self.label_encoder = {
@@ -44,9 +39,10 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
         
         # 0. Preprocessing
         
-        if idx in self.cache: return self.cache[idx]
         idx += self.base_pointer
         assert idx < self.limit_pointer, "index out of bounds"
+        if idx in self.cache: return self.cache[idx] # memoisation
+        
         item = self.source[idx]
         
         label = item["style"]
@@ -70,35 +66,72 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
         assert aligned_to_ai_spectrogram.shape == ai_mel_spectrogram.shape, "DTW was not successful"
         assert aligned_to_ai_spectrogram.shape[1] == 80
         
-        # 3. Return AI Mel, aligned Data Mel, Emotion Label, Speaker Label, original Data Mel
+        # 3. Duration modelling
+        
+        duration_arr = np.zeros(len(ai_mel_spectrogram))
+        duration_idx = 0
+        for i in range(len(duration_arr)):
+            while duration_idx < len(path) and path[duration_idx][0] == i:
+                duration_arr[i] += 1
+                duration_idx += 1
+            pass
+        
+        # 4. Return AI Mel, aligned Data Mel, Emotion Label, Speaker Label, original Data Mel
         self.cache[idx] = {
             "ai_mel": torch.tensor(ai_mel_spectrogram), 
             "data_mel": torch.tensor(aligned_to_ai_spectrogram), 
             "label": torch.tensor([self.label_encoder[label]]), 
             "speaker": torch.tensor([self.speaker_encoder[speaker]]), 
             "original_data_mel": torch.tensor(data_mel_spectrogram),
-            "sequence_length": torch.tensor([ai_mel_spectrogram.shape[0]])
+            "sequence_length": torch.tensor([ai_mel_spectrogram.shape[0]]),
+            "text": item["text"],
+            "duration": torch.tensor(duration_arr)
         }
         return self.cache[idx]
     
     @staticmethod
     def collate(batch):
+        
         assert torch.cuda.is_available()
         device = torch.device("cuda")
+        
         ai_mel = pad_sequence(
             [item["ai_mel"] for item in batch],
-            batch_first=True, padding_value=-np.inf)
+            batch_first=True, padding_value=-np.inf
+        )
         data_mel = pad_sequence(
             [item["data_mel"] for item in batch],
-            batch_first=True, padding_value=-np.inf)
+            batch_first=True, padding_value=-np.inf
+        )
+        duration = pad_sequence(
+            [item["duration"] for item in batch],
+            batch_first=True, padding_value=-np.inf
+        )
+        
         labels = torch.cat(tuple([item["label"] for item in batch]))
         sequence_lengths = torch.cat(tuple([item["sequence_length"] for item in batch]))
+        mask = torch.all(torch.where(torch.isneginf(ai_mel), torch.full(ai_mel.shape, True), torch.full(ai_mel.shape, False)), 2)
+        mask_check = torch.all(torch.where(torch.isneginf(data_mel), torch.full(data_mel.shape, True), torch.full(data_mel.shape, False)), 2)
+        mask_double_check = torch.where(torch.isneginf(duration), torch.full(duration.shape, True), torch.full(duration.shape, False))
+        assert torch.equal(mask, mask_check), "mask is dubious"
+        assert torch.equal(mask, mask_double_check), f"mask is dubious {mask.shape}, {mask_double_check.shape}"
+        
+        batch_size = len(batch)
+        _, ai_mel_max_length, _ = ai_mel.shape
+        assert ai_mel.shape == (batch_size, ai_mel_max_length, 80)
+        assert data_mel.shape == ai_mel.shape
+        assert duration.shape == ai_mel.shape[:2]
+        assert sequence_lengths.shape == torch.Size([batch_size])
+        assert torch.all(sequence_lengths > 0), "not all sequence lengths are positive"
+        assert mask.shape == ai_mel.shape[:2]
+        
         return {
-            "ai_mel": ai_mel.to(device), 
+            "ai_mel": ai_mel.to(device),
             "data_mel": data_mel.to(device), 
             "labels": labels.to(device),
             "sequence_length": sequence_lengths.to(device),
-            "mask": torch.where(torch.isneginf(ai_mel), torch.tensor(0), torch.tensor(1)).to(device)
+            "mask": mask.to(device),
+            "duration": duration.to(device)
         }
 
 class ProcessedMelSpectrogramDataset(torch.utils.data.Dataset):
