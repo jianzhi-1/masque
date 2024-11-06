@@ -26,7 +26,7 @@ class EmotionModel(nn.Module):
         assert not torch.any(torch.isneginf(target_mel))
         assert not torch.any(torch.isinf(target_mel))
         assert not torch.any(torch.isnan(target_mel))
-
+        assert mels_dim >= 1
         cur_loss = torch.sum((predicted_mel - target_mel)**2, dim=2)/mels_dim # average MSE across mel dim = 80
         assert cur_loss.shape == (batch_size, seq_length)
         assert torch.all(batch["sequence_length"] > 0), "sequence length must be positive"
@@ -149,7 +149,7 @@ class TransformerEmotionModel(EmotionModel):
         
         assert mask.shape == (batch_size, seq_length)
         assert mask.get_device() == 0 # cuda
-        mask = torch.cat((torch.ones((batch_size, 1)).to(device), mask), 1)
+        mask = torch.cat((torch.full((batch_size, 1), False).to(device), mask), 1)
         assert mask.shape == (batch_size, 1 + seq_length)
         
         assert label.shape == (batch_size,)
@@ -184,6 +184,9 @@ class TransformerEmotionModel(EmotionModel):
         
         res = post_adjoined[:,1:,:]
         assert res.shape == (batch_size, seq_length, self.n_mels)
+        assert not torch.any(torch.isneginf(res))
+        assert not torch.any(torch.isinf(res))
+        assert not torch.any(torch.isnan(res))
         
         return res
 
