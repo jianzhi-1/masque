@@ -5,6 +5,7 @@ from data_processing_adv import get_spectrogram_from_waveform, transcript_to_mel
 from data_processing import dtw, align
 import tqdm.notebook
 import logging
+import matplotlib.pyplot as plt
 
 class MelSpectrogramDataset(torch.utils.data.Dataset):
     def __init__(self, split, source, params):
@@ -112,7 +113,7 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
             [item["duration"] for item in batch],
             batch_first=True, padding_value=-np.inf
         )
-        
+
         labels = torch.cat(tuple([item["label"] for item in batch]))
         sequence_lengths = torch.cat(tuple([item["sequence_length"] for item in batch]))
         mask = torch.all(torch.where(torch.isneginf(ai_mel), torch.full(ai_mel.shape, True), torch.full(ai_mel.shape, False)), 2)
@@ -252,6 +253,69 @@ def train(model, source, params, num_epochs, batch_size, model_file,
     model.load_state_dict(torch.load(model_file))
     return validation_curve, total_loss_curve
 
+def train_processed(model, data, num_epochs, batch_size, model_file,
+          learning_rate=8e-4, loss_curve=[], validation_curve=[]):
+    training_dataset = ProcessedMelSpectrogramDataset("train", data)
+    validation_dataset = ProcessedMelSpectrogramDataset("valid", data)
+    
+    data_loader = torch.utils.data.DataLoader(
+        training_dataset, batch_size=batch_size, shuffle=True, collate_fn=training_dataset.collate
+    )
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=learning_rate, 
+        betas=(0.9, 0.98), 
+        eps=1e-9
+    )
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer,
+        learning_rate,
+        epochs=num_epochs,
+        steps_per_epoch=len(data_loader),
+        pct_start=0.02,  # Warm up for 2% of the total training time
+    )
+    best_metric = None
+    
+    for epoch in tqdm.notebook.trange(num_epochs, desc="training", unit="epoch"):
+        logging.info(f"=== EPOCH {epoch + 1}")
+        with tqdm.notebook.tqdm(
+            data_loader,
+            desc="epoch {}".format(epoch + 1),
+            unit="batch",
+            total=len(data_loader)) as batch_iterator:
+            model.train()
+            total_loss = 0.0
+            for i, batch in enumerate(batch_iterator, start=1):
+                optimizer.zero_grad()
+                loss = model.compute_loss(batch)
+                total_loss += loss.item()
+                loss_curve.append(loss.item())
+                if i % 10 == 0:
+                    print(f"epoch={epoch + 1}; batch={i}; loss={loss.item()}; total_loss={total_loss}")
+                logging.info(f"epoch={epoch + 1}; batch={i}; loss={loss.item()}; total_loss={total_loss}")
+                loss.backward()
+                optimizer.step()
+                scheduler.step()
+                batch_iterator.set_postfix(mean_loss=total_loss / i)
+            validation_metric = model.get_validation_metric(validation_dataset)
+            validation_curve.append(validation_metric.item())
+            batch_iterator.set_postfix(
+                mean_loss=total_loss / i,
+                validation_metric=validation_metric
+            )
+            print(f"epoch={epoch + 1}; validation={validation_metric}")
+            logging.info(f"epoch={epoch + 1}; validation={validation_metric}")
+            if best_metric is None or validation_metric < best_metric:
+                print(
+                    "Obtained a new best validation metric of {:.3f}, saving model "
+                    "checkpoint to {}...".format(validation_metric, model_file)
+                )
+                torch.save(model.state_dict(), model_file)
+                best_metric = validation_metric
+        logging.info(f"=== END OF EPOCH {epoch + 1}")
+    print("Reloading best model checkpoint from {}...".format(model_file))
+    model.load_state_dict(torch.load(model_file))
+
 def predict(model, source, params, dataset_cls=MelSpectrogramDataset, num_limit=10):
 
     model.eval()
@@ -263,7 +327,32 @@ def predict(model, source, params, dataset_cls=MelSpectrogramDataset, num_limit=
     )
 
     data_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=1, collate_fn=dataset.collate
+        test_dataset, batch_size=1, collate_fn=test_dataset.collate
+    )
+    
+    with tqdm.notebook.tqdm(
+        data_loader,
+        total=len(data_loader)) as batch_iterator:
+        model.eval()
+
+        for i, batch in enumerate(batch_iterator, start=1):
+            if i > num_limit: break
+            _, seq_length, n_mels = batch["ai_mel"].shape
+            assert n_mels == 80
+            pred = model.transform(batch)
+            assert pred.shape == (1, seq_length, n_mels)
+            assert pred.squeeze().shape == (seq_length, n_mels)
+            mel_to_audio(pred.squeeze(), f"test{i}_pred.wav")
+            mel_to_audio(batch["data_mel"].squeeze(), f"test{i}_actual.wav")
+
+def predict_processed(model, data, num_limit=10):
+
+    model.eval()
+
+    test_dataset = ProcessedMelSpectrogramDataset("test", data)
+
+    data_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=1, collate_fn=test_dataset.collate
     )
     
     with tqdm.notebook.tqdm(
@@ -320,6 +409,30 @@ if __name__ == "__main__":
     }, save_file_name="speaker1.pth")
 
     # Processed dataset
-    processed_dataset = torch.load("speaker1.pth")
-    train_processed_dataset = ProcessedMelSpectrogramDataset("train", processed_dataset)
+    processed_dataset = torch.load("/kaggle/input/speaker1-processed/speaker1.pth")
+
+    # Training
+    loss_curve = []
+    validation_curve = []
+    train_processed(
+        transformer_encoder_model, 
+        processed_dataset, 
+        num_epochs=5, 
+        batch_size=64,
+        model_file="transformer_encoder_model_speaker_one.pt", 
+        learning_rate=0.1, 
+        loss_curve=loss_curve, 
+        validation_curve=validation_curve
+    )
+
+    # Visualisation
+    plt.plot(np.arange(len(loss_curve)), np.log(np.array(loss_curve)))
+    plt.plot(np.arange(len(validation_curve)), np.log(np.array([x.item() for x in validation_curve])))
+
+    # Prediction
+    predict_processed(
+        transformer_predict_model, 
+        processed_dataset,
+        num_limit=10
+    )
 
