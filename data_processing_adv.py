@@ -6,14 +6,18 @@ import matplotlib.pyplot as plt
 import librosa
 import torch
 import numpy as np
+import IPython.display as ipd
 
 # Load a pretrained HIFIGAN Vocoder
 tacotron2 = Tacotron2.from_hparams(source="speechbrain/tts-tacotron2-ljspeech", savedir="tmpdir_tts")
 hifi_gan = HIFIGAN.from_hparams(source="speechbrain/tts-hifigan-ljspeech", savedir="tmpdir_vocoder")
 
-def view_spectrogram(spectrogram, title="Mel Spectrogram"):
-    if isinstance(spectrogram, torch.Tensor):
-        spectrogram = spectrogram.numpy()
+def view_spectrogram(spectrogram, title="Mel Spectrogram", n_mels=80):
+    if isinstance(spectrogram, np.ndarray):
+        spectrogram = torch.tensor(spectrogram)
+    if spectrogram.shape[0] != 80:
+        spectrogram = torch.einsum("ij->ji", spectrogram)
+    assert spectrogram.shape[0] == n_mels, f"spectrogram shape {spectrogram.shape} != ({n_mels}, seq_length)"
     print(spectrogram.shape)
     plt.figure(figsize=(10, 4))
     librosa.display.specshow(spectrogram, sr=22050, x_axis='time', y_axis='mel', fmax=8000)
@@ -119,13 +123,15 @@ def transcript_to_mel(sentence):
     mel_output, mel_length, alignment = tacotron2.encode_text(sentence)
     return mel_output.squeeze() # remove the batch dimension
 
-def mel_to_audio(mel_output, save_file_name):
+def mel_to_audio(mel_output, save_file_name=None, display=False):
     if isinstance(mel_output, np.ndarray):
         mel_output = torch.tensor(mel_output)
     if mel_output.shape[0] != 80:
         mel_output = torch.einsum("ij->ji", mel_output)
     waveforms = hifi_gan.decode_batch(mel_output) # spectrogram to waveform
-    torchaudio.save(save_file_name, waveforms.squeeze(1), 22050)
+    if save_file_name is not None: torchaudio.save(save_file_name, waveforms.squeeze(1), 22050)
+    if display: return ipd.Audio(waveforms, rate=22050)
+    return waveforms
 
 def sample_audio(dataset, idx:int):
     print(dataset[idx])
