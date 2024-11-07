@@ -14,13 +14,11 @@ class EmotionModel(nn.Module):
 
         predicted_mel = self.transform(batch)
         assert predicted_mel.shape == (batch_size, seq_length, mels_dim)
-        predicted_mel = torch.nan_to_num(batch["ai_mel"], nan=0.0) # purge tensor of -inf
-        assert predicted_mel.shape == (batch_size, seq_length, mels_dim)
         assert not torch.any(torch.isnan(predicted_mel))
 
         target_mel = batch["data_mel"]
         assert target_mel.shape == (batch_size, seq_length, mels_dim)
-        target_mel = torch.nan_to_num(batch["data_mel"], nan=0.0) # purge tensor of -inf
+        target_mel = torch.nan_to_num(batch["data_mel"], nan=0.0) # purge tensor of nan
         assert target_mel.shape == (batch_size, seq_length, mels_dim)
         assert not torch.any(torch.isnan(target_mel))
         assert mels_dim >= 1
