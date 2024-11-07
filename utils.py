@@ -90,8 +90,12 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
             "speaker": torch.tensor([self.speaker_encoder[speaker]]), 
             "original_data_mel": torch.tensor(data_mel_spectrogram),
             "sequence_length": torch.tensor([ai_mel_spectrogram.shape[0]]),
+            "duration": torch.tensor(duration_arr),
             "text": item["text"],
-            "duration": torch.tensor(duration_arr)
+            "data_audio": item["audio"]["array"],
+            "data_sample_rate": item["audio"]["sampling_rate"],
+            "ai_audio": mel_to_audio(ai_mel_spectrogram),
+            "ai_sample_rate": 22050
         }
         return self.cache[idx]
     
@@ -103,22 +107,21 @@ class MelSpectrogramDataset(torch.utils.data.Dataset):
         
         ai_mel = pad_sequence(
             [item["ai_mel"] for item in batch],
-            batch_first=True, padding_value=-np.inf
+            batch_first=True, padding_value=np.nan
         )
         data_mel = pad_sequence(
             [item["data_mel"] for item in batch],
-            batch_first=True, padding_value=-np.inf
+            batch_first=True, padding_value=np.nan
         )
         duration = pad_sequence(
             [item["duration"] for item in batch],
-            batch_first=True, padding_value=-np.inf
+            batch_first=True, padding_value=np.nan
         )
-
         labels = torch.cat(tuple([item["label"] for item in batch]))
         sequence_lengths = torch.cat(tuple([item["sequence_length"] for item in batch]))
-        mask = torch.all(torch.where(torch.isneginf(ai_mel), torch.full(ai_mel.shape, True), torch.full(ai_mel.shape, False)), 2)
-        mask_check = torch.all(torch.where(torch.isneginf(data_mel), torch.full(data_mel.shape, True), torch.full(data_mel.shape, False)), 2)
-        mask_double_check = torch.where(torch.isneginf(duration), torch.full(duration.shape, True), torch.full(duration.shape, False))
+        mask = torch.all(torch.where(torch.isnan(ai_mel), torch.full(ai_mel.shape, True), torch.full(ai_mel.shape, False)), 2)
+        mask_check = torch.all(torch.where(torch.isnan(data_mel), torch.full(data_mel.shape, True), torch.full(data_mel.shape, False)), 2)
+        mask_double_check = torch.where(torch.isnan(duration), torch.full(duration.shape, True), torch.full(duration.shape, False))
         assert torch.equal(mask, mask_check), "mask is dubious"
         assert torch.equal(mask, mask_double_check), f"mask is dubious {mask.shape}, {mask_double_check.shape}"
         
