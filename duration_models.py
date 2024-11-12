@@ -24,10 +24,11 @@ class DurationModel(nn.Module):
         assert target_duration.shape == (batch_size, seq_length)
 
         target_duration = torch.nan_to_num(target_duration, nan=-1)
+        target_duration = torch.where(target_duration >= self.max_duration, torch.tensor(-1, device=device), target_duration)
         assert not torch.any(torch.isnan(target_duration))
-        assert torch.all(target_duration >= -1)
+        assert torch.all(target_duration >= -1) and torch.all(target_duration < self.max_duration)
 
-        loss = nn.CrossEntropyLoss(ignore_index=-1, reduction="sum")(logits.view(-1, self.max_duration), target_duration.view(-1))
+        loss = nn.CrossEntropyLoss(ignore_index=-1, reduction="sum")(logits.reshape(-1, self.max_duration), target_duration.view(-1))
 
         return loss
   
@@ -72,7 +73,7 @@ class AddPositionalEncoding(nn.Module):
 
 class TransformerDurationModel(DurationModel):
     def __init__(self, max_duration, d_model=512, num_encoder_layers=6, dropout=0.1):
-        super().__init__()
+        super().__init__(max_duration)
         self.n_mels = 80
         self.max_duration = max_duration # 0, ..., max_duration - 1
         self.d_model = d_model
