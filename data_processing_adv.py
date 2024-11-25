@@ -13,10 +13,10 @@ tacotron2 = Tacotron2.from_hparams(source="speechbrain/tts-tacotron2-ljspeech", 
 hifi_gan = HIFIGAN.from_hparams(source="speechbrain/tts-hifigan-ljspeech", savedir="tmpdir_vocoder")
 
 def view_spectrogram(spectrogram, title="Mel Spectrogram", n_mels=80):
-    if isinstance(spectrogram, np.ndarray):
-        spectrogram = torch.tensor(spectrogram)
+    if not isinstance(spectrogram, np.ndarray):
+        spectrogram = spectrogram.numpy()
     if spectrogram.shape[0] != 80:
-        spectrogram = torch.einsum("ij->ji", spectrogram)
+        spectrogram = np.einsum("ij->ji", spectrogram)
     assert spectrogram.shape[0] == n_mels, f"spectrogram shape {spectrogram.shape} != ({n_mels}, seq_length)"
     print(spectrogram.shape)
     plt.figure(figsize=(10, 4))
