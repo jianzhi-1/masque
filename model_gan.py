@@ -91,3 +91,36 @@ class GAN():
                 logging.info(f"validation; batch={i}; loss={loss_g.item()}; total_mse={total_loss}; ave_loss={total_loss/total}")
 
         return total_loss/total
+
+if __name__ == "__main__":
+
+    # 1. Set up
+    transformer_encoder_model = TransformerEmotionModel(d_model=512, num_encoder_layers=6, dropout=0.1)
+    transformer_encoder_model.to(device)
+
+    discriminator_model = Discriminator(n_mels=80)
+    discriminator_model.to(device)
+
+    gan = GAN(transformer_encoder_model, discriminator_model, alpha)
+
+    # 2. Training parameters
+    alpha = 100
+    loss_curve_g = []
+    loss_curve_d = []
+    validation_curve = []
+
+    # 3. Train loop
+    train_gan(
+        gan,
+        dataset, 
+        num_epochs=40, 
+        batch_size=64,
+        model_file_g="transformer_encoder_model_speaker_4.pt",
+        model_file_d="discriminator_model_speaker_4.pt",
+        learning_rate_g=5e-4, 
+        learning_rate_d=5e-4, 
+        loss_curve_g=loss_curve_g, 
+        loss_curve_d=loss_curve_d, 
+        validation_curve=validation_curve,
+        best_metric=None
+    )

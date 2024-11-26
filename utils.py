@@ -320,35 +320,36 @@ def train_processed(model, data, num_epochs, batch_size, model_file,
     print("Reloading best model checkpoint from {}...".format(model_file))
     model.load_state_dict(torch.load(model_file))
 
-def train_gan(generator, discriminator, alpha, data, num_epochs, batch_size, model_file_g, model_file_d,
-          learning_rate=8e-4, loss_curve_g=[], loss_curve_d=[], validation_curve=[]):
+def train_gan(gan, data, num_epochs, batch_size, model_file_g, model_file_d,
+          learning_rate_g=8e-4, learning_rate_d=8e-4, loss_curve_g=[], loss_curve_d=[], validation_curve=[], best_metric=None):
     
     training_dataset = ProcessedMelSpectrogramDataset("train", data)
     validation_dataset = ProcessedMelSpectrogramDataset("valid", data)
+    validation_data_loader = torch.utils.data.DataLoader(
+        validation_dataset, batch_size=batch_size, collate_fn=validation_dataset.collate
+    )
     
     data_loader = torch.utils.data.DataLoader(
         training_dataset, batch_size=batch_size, shuffle=True, collate_fn=training_dataset.collate
     )
 
-    gan = GAN(generator, discriminator, alpha=alpha)
-
     optimizer_g = torch.optim.Adam(
-        generator.parameters(),
-        lr=learning_rate, 
+        gan.generator.parameters(),
+        lr=learning_rate_g, 
         betas=(0.9, 0.98), 
         eps=1e-9
     )
 
     optimizer_d = torch.optim.Adam(
-        discriminator.parameters(),
-        lr=learning_rate,
+        gan.discriminator.parameters(),
+        lr=learning_rate_d,
         betas=(0.9, 0.98), 
         eps=1e-9
     )
 
     scheduler_g = torch.optim.lr_scheduler.OneCycleLR(
         optimizer_g,
-        learning_rate,
+        learning_rate_g,
         epochs=num_epochs,
         steps_per_epoch=len(data_loader),
         pct_start=0.02,  # Warm up for 2% of the total training time
@@ -356,7 +357,7 @@ def train_gan(generator, discriminator, alpha, data, num_epochs, batch_size, mod
 
     scheduler_d = torch.optim.lr_scheduler.OneCycleLR(
         optimizer_d,
-        learning_rate,
+        learning_rate_d,
         epochs=num_epochs,
         steps_per_epoch=len(data_loader),
         pct_start=0.02,  # Warm up for 2% of the total training time
@@ -373,36 +374,38 @@ def train_gan(generator, discriminator, alpha, data, num_epochs, batch_size, mod
             total=len(data_loader)) as batch_iterator:
 
             # 0. Set train mode
-            generator.train()
-            discriminator.train()
+            gan.generator.train()
+            gan.discriminator.train()
 
             total_loss_g = 0.0
             total_loss_d = 0.0
             total = 0
             for i, batch in enumerate(batch_iterator, start=1):
-                # 0. Zero grad first
-                optimizer_g.zero_grad()
-                optimizer_d.zero_grad()
 
-                # 1. Compute loss
-                generator_loss, discriminator_loss = gan.compute_loss(batch)
+                # 0. Discriminator loss
+                optimizer_d.zero_grad()
+                _, discriminator_loss = gan.compute_loss(batch)
+                discriminator_loss.backward()
+                d_loss = discriminator_loss.item()
+                total_loss_d += d_loss
+                optimizer_d.step()
+                del _, discriminator_loss
+
+                # 1. Generator loss
+                optimizer_g.zero_grad()
+                generator_loss, _ = gan.compute_loss(batch)
+                generator_loss.backward()
+                g_loss = generator_loss.item()
+                total_loss_g += g_loss
+                optimizer_g.step()
+                del generator_loss, _
+                
+                torch.cuda.empty_cache() # Clear memory, or else Cuda out of memory
 
                 # 2. Compute statistics
-                # loss = model.compute_loss(batch)
-                total_loss_g += generator_loss.item()
-                total_loss_d += discriminator_loss.item()
                 total += batch["ai_mel"].size(0)
-                # if i % 10 == 0:
-                #     print(f"epoch={epoch + 1}; batch={i}; loss={loss.item()}; total_loss={total_loss}")
-                # logging.info(f"epoch={epoch + 1}; batch={i}; loss={loss.item()}; total_loss={total_loss}")
-                
-                # 3. Step optimisers and backpropagate and step schedulers
-
-                discriminator_loss.backward()
-                optimizer_d.step()
-
-                generator_loss.backward()
-                optimizer_g.step()
+                if i % 10 == 0:
+                    print(f"epoch={epoch + 1}; batch={i}; generator_loss={g_loss}; discriminator_loss={d_loss}; average generator_loss={total_loss_g/total}; average discriminator_loss={total_loss_d/total}")
 
                 scheduler_g.step()
                 scheduler_d.step()
@@ -412,7 +415,7 @@ def train_gan(generator, discriminator, alpha, data, num_epochs, batch_size, mod
             loss_curve_g.append(total_loss_g/total)
             loss_curve_d.append(total_loss_d/total)
 
-            validation_metric = gan.get_validation_metric(validation_dataset)
+            validation_metric = gan.get_validation_metric(validation_data_loader)
             validation_curve.append(validation_metric.item())
 
             batch_iterator.set_postfix(
@@ -427,14 +430,14 @@ def train_gan(generator, discriminator, alpha, data, num_epochs, batch_size, mod
                     "Obtained a new best validation metric of {:.3f}, saving model "
                     "checkpoint to {} and {}...".format(validation_metric, model_file_g, model_file_d)
                 )
-                torch.save(generator.state_dict(), model_file_g)
-                torch.save(discriminator.state_dict(), model_file_d)
+                torch.save(gan.generator.state_dict(), model_file_g)
+                torch.save(gan.discriminator.state_dict(), model_file_d)
                 best_metric = validation_metric
             
         logging.info(f"=== END OF EPOCH {epoch + 1}")
     print("Reloading best model checkpoint from {} and {}...".format(model_file_g, model_file_d))
-    generator.load_state_dict(torch.load(model_file_g))
-    discriminator.load_state_dict(torch.load(model_file_d))
+    gan.generator.load_state_dict(torch.load(model_file_g))
+    gan.discriminator.load_state_dict(torch.load(model_file_d))
 
 def predict(model, source, params, dataset_cls=MelSpectrogramDataset, num_limit=10):
 
