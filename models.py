@@ -26,6 +26,23 @@ class EmotionModel(nn.Module):
         assert mels_dim >= 1
         loss = torch.sum((predicted_mel - target_mel)**2)
         return loss
+
+    def compute_loss_gan(self, batch):
+        batch_size, seq_length, mels_dim = batch["ai_mel"].shape
+        assert batch["data_mel"].shape == (batch_size, seq_length, mels_dim)
+
+        predicted_mel = self.transform(batch)
+        assert predicted_mel.shape == (batch_size, seq_length, mels_dim)
+        assert not torch.any(torch.isnan(predicted_mel))
+
+        target_mel = batch["data_mel"]
+        assert target_mel.shape == (batch_size, seq_length, mels_dim)
+        target_mel = torch.nan_to_num(batch["data_mel"], nan=0.0) # purge tensor of nan
+        assert target_mel.shape == (batch_size, seq_length, mels_dim)
+        assert not torch.any(torch.isnan(target_mel))
+        assert mels_dim >= 1
+        loss = torch.sum((predicted_mel - target_mel)**2)
+        return loss, predicted_mel
   
     def get_validation_metric(self, validation_dataset, batch_size=64):
         dataset = validation_dataset # replace because of caching efficiency
@@ -143,56 +160,6 @@ class TransformerEmotionModel(EmotionModel):
         assert not torch.any(torch.isnan(res))
         
         return res
-
-class TransformerEmotionGANModel(TransformerEmotionModel):
-    def __init__(self, d_model=512, num_encoder_layers=6, dropout=0.1):
-        super().__init__(d_model=d_model, num_encoder_layers=num_encoder_layers, dropout=dropout)
-        self.mpd = MultiPeriodDiscriminator().to(device)
-        self.msd = MultiScaleDiscriminator().to(device)
-    
-    def compute_loss(self, batch):
-        batch_size, seq_length, mels_dim = batch["ai_mel"].shape
-        assert batch["data_mel"].shape == (batch_size, seq_length, mels_dim)
-
-        predicted_mel = self.transform(batch)
-        assert predicted_mel.shape == (batch_size, seq_length, mels_dim)
-        assert not torch.any(torch.isnan(predicted_mel))
-
-        target_mel = batch["data_mel"]
-        assert target_mel.shape == (batch_size, seq_length, mels_dim)
-        target_mel = torch.nan_to_num(batch["data_mel"], nan=0.0) # purge tensor of nan
-        assert target_mel.shape == (batch_size, seq_length, mels_dim)
-        assert not torch.any(torch.isnan(target_mel))
-        assert mels_dim >= 1
-
-        # TODO: Add GANLoss for generator
-        # Credit: https://github.com/jik876/hifi-gan/blob/master/train.py
-        y = batch["ai_audio"]
-        y_g_hat_mel = predicted_mel
-        y_g_hat = mel_to_audio(predicted_mel.squeeze()) # generated waveform
-        loss_mel = torch.sum((predicted_mel - target_mel)**2)
-
-        # MPD
-        y_df_hat_r, y_df_hat_g, _, _ = self.mpd(y, y_g_hat.detach())
-        loss_disc_f, losses_disc_f_r, losses_disc_f_g = discriminator_loss(y_df_hat_r, y_df_hat_g)
-
-        # MSD
-        y_ds_hat_r, y_ds_hat_g, _, _ = self.msd(y, y_g_hat.detach())
-        loss_disc_s, losses_disc_s_r, losses_disc_s_g = discriminator_loss(y_ds_hat_r, y_ds_hat_g)
-
-        # Discriminator loss
-        loss_disc_all = loss_disc_s + loss_disc_f
-
-        # Generator loss
-        y_df_hat_r, y_df_hat_g, fmap_f_r, fmap_f_g = self.mpd(y, y_g_hat)
-        y_ds_hat_r, y_ds_hat_g, fmap_s_r, fmap_s_g = self.msd(y, y_g_hat)
-        loss_fm_f = feature_loss(fmap_f_r, fmap_f_g)
-        loss_fm_s = feature_loss(fmap_s_r, fmap_s_g)
-        loss_gen_f, losses_gen_f = generator_loss(y_df_hat_g)
-        loss_gen_s, losses_gen_s = generator_loss(y_ds_hat_g)
-        loss_gen_all = loss_gen_s + loss_gen_f + loss_fm_s + loss_fm_f + loss_mel
-
-        return loss_disc_all, loss_gen_all
 
 if __name__ == "__main__":
     from datasets import load_dataset
