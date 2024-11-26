@@ -6,6 +6,7 @@ from data_processing import dtw, align
 import tqdm.notebook
 import logging
 import matplotlib.pyplot as plt
+from model import GAN
 
 class MelSpectrogramDataset(torch.utils.data.Dataset):
     def __init__(self, split, source, params):
@@ -318,6 +319,122 @@ def train_processed(model, data, num_epochs, batch_size, model_file,
         logging.info(f"=== END OF EPOCH {epoch + 1}")
     print("Reloading best model checkpoint from {}...".format(model_file))
     model.load_state_dict(torch.load(model_file))
+
+def train_gan(generator, discriminator, alpha, data, num_epochs, batch_size, model_file_g, model_file_d,
+          learning_rate=8e-4, loss_curve_g=[], loss_curve_d=[], validation_curve=[]):
+    
+    training_dataset = ProcessedMelSpectrogramDataset("train", data)
+    validation_dataset = ProcessedMelSpectrogramDataset("valid", data)
+    
+    data_loader = torch.utils.data.DataLoader(
+        training_dataset, batch_size=batch_size, shuffle=True, collate_fn=training_dataset.collate
+    )
+
+    gan = GAN(generator, discriminator, alpha=alpha)
+
+    optimizer_g = torch.optim.Adam(
+        generator.parameters(),
+        lr=learning_rate, 
+        betas=(0.9, 0.98), 
+        eps=1e-9
+    )
+
+    optimizer_d = torch.optim.Adam(
+        discriminator.parameters(),
+        lr=learning_rate,
+        betas=(0.9, 0.98), 
+        eps=1e-9
+    )
+
+    scheduler_g = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer_g,
+        learning_rate,
+        epochs=num_epochs,
+        steps_per_epoch=len(data_loader),
+        pct_start=0.02,  # Warm up for 2% of the total training time
+    )
+
+    scheduler_d = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer_d,
+        learning_rate,
+        epochs=num_epochs,
+        steps_per_epoch=len(data_loader),
+        pct_start=0.02,  # Warm up for 2% of the total training time
+    )
+
+    best_metric = None
+    
+    for epoch in tqdm.notebook.trange(num_epochs, desc="training", unit="epoch"):
+        logging.info(f"=== EPOCH {epoch + 1}")
+        with tqdm.notebook.tqdm(
+            data_loader,
+            desc="epoch {}".format(epoch + 1),
+            unit="batch",
+            total=len(data_loader)) as batch_iterator:
+
+            # 0. Set train mode
+            generator.train()
+            discriminator.train()
+
+            total_loss_g = 0.0
+            total_loss_d = 0.0
+            total = 0
+            for i, batch in enumerate(batch_iterator, start=1):
+                # 0. Zero grad first
+                optimizer_g.zero_grad()
+                optimizer_d.zero_grad()
+
+                # 1. Compute loss
+                generator_loss, discriminator_loss = gan.compute_loss(batch)
+
+                # 2. Compute statistics
+                # loss = model.compute_loss(batch)
+                total_loss_g += generator_loss.item()
+                total_loss_d += discriminator_loss.item()
+                total += batch["ai_mel"].size(0)
+                # if i % 10 == 0:
+                #     print(f"epoch={epoch + 1}; batch={i}; loss={loss.item()}; total_loss={total_loss}")
+                # logging.info(f"epoch={epoch + 1}; batch={i}; loss={loss.item()}; total_loss={total_loss}")
+                
+                # 3. Step optimisers and backpropagate and step schedulers
+
+                discriminator_loss.backward()
+                optimizer_d.step()
+
+                generator_loss.backward()
+                optimizer_g.step()
+
+                scheduler_g.step()
+                scheduler_d.step()
+
+                batch_iterator.set_postfix(mean_loss=total_loss_g / i)
+            
+            loss_curve_g.append(total_loss_g/total)
+            loss_curve_d.append(total_loss_d/total)
+
+            validation_metric = gan.get_validation_metric(validation_dataset)
+            validation_curve.append(validation_metric.item())
+
+            batch_iterator.set_postfix(
+                mean_loss=total_loss_g / i,
+                validation_metric=validation_metric
+            )
+
+            print(f"epoch={epoch + 1}; validation={validation_metric}")
+            logging.info(f"epoch={epoch + 1}; validation={validation_metric}")
+            if best_metric is None or validation_metric < best_metric:
+                print(
+                    "Obtained a new best validation metric of {:.3f}, saving model "
+                    "checkpoint to {} and {}...".format(validation_metric, model_file_g, model_file_d)
+                )
+                torch.save(generator.state_dict(), model_file_g)
+                torch.save(discriminator.state_dict(), model_file_d)
+                best_metric = validation_metric
+            
+        logging.info(f"=== END OF EPOCH {epoch + 1}")
+    print("Reloading best model checkpoint from {} and {}...".format(model_file_g, model_file_d))
+    generator.load_state_dict(torch.load(model_file_g))
+    discriminator.load_state_dict(torch.load(model_file_d))
 
 def predict(model, source, params, dataset_cls=MelSpectrogramDataset, num_limit=10):
 
