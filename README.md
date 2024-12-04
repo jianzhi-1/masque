@@ -2,9 +2,9 @@
 
 ### Progress
 - [x] Phase I: Transformer encoder architecture
-- [ ] Phase II: upcoming
-- [ ] Phase III: upcoming
-- [ ] Phase IV: upcoming
+- [x] Phase II: GAN-loss
+- [x] Phase III: Add CNN preprocessing layers
+- [x] Phase IV: SPARC
 - [ ] Report
 
 ### Set up
