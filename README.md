@@ -1,11 +1,14 @@
 # Masque 🎭
 
+[Report](https://github.com/jianzhi-1/masque/blob/main/report.pdf)
+[Presentation](https://github.com/jianzhi-1/masque/blob/main/presentation.pdf)
+
 ### Progress
 - [x] Phase I: Transformer encoder architecture
 - [x] Phase II: GAN-loss
 - [x] Phase III: Add CNN preprocessing layers
 - [x] Phase IV: SPARC
-- [ ] Report
+- [x] Report
 
 ### Set up
 ```python
