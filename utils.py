@@ -9,7 +9,6 @@ from speechbrain.inference.TTS import Tacotron2
 from speechbrain.lobes.models.FastSpeech2 import mel_spectogram
 
 import torch
-from torch.nn.utils.rnn import pad_sequence
 import torchaudio
 
 ### Constants
