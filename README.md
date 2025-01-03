@@ -12,6 +12,8 @@ The novel part of this project is the usage of articulatory features as intermed
 
 This repository documents the research infrastructure (models, training, utility functions). See the [app repo](https://github.com/jianzhi-1/masque-prod) for a quickstart on using the model.
 
+_(This project is completed during UC Berkeley Fall 2024's iteration of ELENG 225D Audio Signal Processing.)_
+
 ### Set up
 ```shell
 sh setup.sh

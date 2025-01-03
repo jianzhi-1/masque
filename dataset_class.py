@@ -160,3 +160,62 @@ class ProcessedMelSpectrogramDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx:int):
         assert idx >= 0 and idx < len(self), "Index error in ProcessedMelSpectrogramDataset"
         return self.data[self.split][idx]
+    
+    @staticmethod
+    def collate(batch):
+        
+        assert torch.cuda.is_available()
+        device = torch.device("cuda")
+        
+        ai_mel = pad_sequence(
+            [item["ai_mel"] for item in batch],
+            batch_first=True, padding_value=np.nan
+        )
+        data_mel = pad_sequence(
+            [item["data_mel"] for item in batch],
+            batch_first=True, padding_value=np.nan
+        )
+
+        # duration = pad_sequence(
+        #     [item["duration"] for item in batch],
+        #     batch_first=True, padding_value=np.nan
+        # )
+
+        labels = torch.cat(tuple([item["label"] for item in batch]))
+        # sequence_lengths = torch.cat(tuple([item["sequence_length"] for item in batch]))
+        mask = torch.all(torch.where(torch.isnan(ai_mel), torch.full(ai_mel.shape, True), torch.full(ai_mel.shape, False)), 2)
+        mask_check = torch.all(torch.where(torch.isnan(data_mel), torch.full(data_mel.shape, True), torch.full(data_mel.shape, False)), 2)
+        # mask_double_check = torch.where(torch.isnan(duration), torch.full(duration.shape, True), torch.full(duration.shape, False))
+        assert torch.equal(mask, mask_check), "mask is dubious"
+        # assert torch.equal(mask, mask_double_check), f"mask is dubious {mask.shape}, {mask_double_check.shape}"
+
+        ai_mel = pad_sequence(
+            [(item["ai_mel"] - mu)/sig for item in batch],
+            batch_first=True, padding_value=0.0
+        )
+        data_mel = pad_sequence(
+            [(item["data_mel"] - mu_data)/sig_data for item in batch],
+            batch_first=True, padding_value=0.0
+        )
+        # duration = pad_sequence(
+        #     [item["duration"] for item in batch],
+        #     batch_first=True, padding_value=0.0
+        # )
+        
+        batch_size = len(batch)
+        _, ai_mel_max_length, _ = ai_mel.shape
+        assert ai_mel.shape == (batch_size, ai_mel_max_length, 80)
+        assert data_mel.shape == ai_mel.shape
+        # assert duration.shape == ai_mel.shape[:2]
+        # assert sequence_lengths.shape == torch.Size([batch_size])
+        # assert torch.all(sequence_lengths > 0), "not all sequence lengths are positive"
+        assert mask.shape == ai_mel.shape[:2]
+        
+        return {
+            "ai_mel": ai_mel.to(device),
+            "data_mel": data_mel.to(device), 
+            "labels": labels.to(device),
+            # "sequence_length": sequence_lengths.to(device),
+            "mask": mask.to(device) #,
+            # "duration": duration.to(device)
+        }
